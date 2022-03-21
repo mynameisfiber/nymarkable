@@ -134,16 +134,19 @@ def download_pages(article_dir):
         except selenium.common.exceptions.NoSuchElementException:
             pass
 
-        sections = driver.find_elements(By.XPATH, '//div[@class = "accordion-section"]')
+        sections = driver.find_elements(
+            By.CLASS_NAME,
+            "accordion-section",
+        )
         article_num = 0
         article_pdfs = []
         for section in sections:
             section.click()
             time.sleep(1)
             section_title = section.find_element(
-                By.XPATH, './/div[@class = "accordion-section-header-text"]'
+                By.CLASS_NAME, "accordion-section-header-text"
             ).text
-            headlines = section.find_elements(By.XPATH, './/div[@class = "headline"]')
+            headlines = section.find_elements(By.CLASS_NAME, "headline")
             for headline in headlines:
                 article_filename = (
                     article_dir
@@ -158,16 +161,18 @@ def download_pages(article_dir):
                 ):
                     print("Skipping headline:", headline.text)
                     continue
-                pdf = driver.execute_cdp_cmd(
-                    "Page.printToPDF", {"printBackground": True}
-                )
-                with open(article_filename, "wb") as fd:
-                    fd.write(base64.b64decode(pdf["data"]))
+                print_pdf(driver, article_filename)
                 article_pdfs.append(
                     {"filename": article_filename, "headline": headline.text}
                 )
                 article_num += 1
     return article_pdfs
+
+
+def print_pdf(driver, output):
+    pdf = driver.execute_cdp_cmd("Page.printToPDF", {"printBackground": True})
+    with open(output, "wb") as fd:
+        fd.write(base64.b64decode(pdf["data"]))
 
 
 def merge_pdfs(articles, output):
