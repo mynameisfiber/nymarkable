@@ -1,0 +1,6 @@
+browser_profile
+*.pdf
+temp
+build
+venv
+*.egg-info/
