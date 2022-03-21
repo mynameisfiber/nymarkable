@@ -35,7 +35,7 @@ This will download the current edition of the NYTimes and create `nytimes.pdf`. 
 
 ### Create edition and send to remarkable
 
-Same as creating a standalone PDF but we also get to supply a device IP,
+Same as creating a standalone PDF but we also get to supply a device IP. This curently uses the USB web interface to do the upload, so that feature should be enabled and the device connected to your machine.
 
 ```
 $ nymarkable update-device --device-ip 10.11.99.1 --filename nytimes.pdf
