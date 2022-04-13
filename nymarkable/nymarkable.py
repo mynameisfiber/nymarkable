@@ -13,11 +13,18 @@ import requests
 
 import selenium
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import (
+    WebDriverException,
+    ElementClickInterceptedException,
+    ElementNotInteractableException,
+)
 from selenium import webdriver
 from PyPDF2 import PdfFileMerger
 
 
 DRIVER = None
+CONFIG_DIR = Path("~/.nymarkable").expanduser()
+CONFIG_DIR.mkdir(exist_ok=True)
 
 
 class NotLoggedIn(Exception):
@@ -37,7 +44,7 @@ def login_cli():
 @cli.command("create-edition")
 @click.argument("output-file", type=click.Path(dir_okay=False, writable=True))
 def create_edition_cli(output_file):
-    with tempfile.TemporaryDirectory() as tempdir:
+    with tempfile.TemporaryDirectory(dir=CONFIG_DIR) as tempdir:
         articles = login_and_download(Path(tempdir))
         merge_pdfs(articles, output_file)
 
@@ -46,7 +53,7 @@ def create_edition_cli(output_file):
 @click.option("--device-ip", default="10.11.99.1", type=str)
 @click.option("--filename", default="nytimes.pdf")
 def update_device(device_ip, filename):
-    with tempfile.TemporaryDirectory() as tempdir:
+    with tempfile.TemporaryDirectory(dir=CONFIG_DIR) as tempdir:
         tempdir = Path(tempdir)
         articles = login_and_download(tempdir)
         merge_pdfs(articles, tempdir / "output.pdf")
@@ -72,6 +79,9 @@ def create_driver(headless=False):
         yield DRIVER
         return
     chrome_options = webdriver.ChromeOptions()
+    profile_dir = CONFIG_DIR / "browser_profile/"
+    chrome_options.add_argument(f"user-data-dir={profile_dir}/")
+
     settings = {
         "recentDestinations": [
             {
@@ -86,31 +96,56 @@ def create_driver(headless=False):
     prefs = {
         "printing.print_preview_sticky_settings.appState": json.dumps(settings),
     }
+    chrome_options.add_argument("start-maximized")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option("useAutomationExtension", False)
     chrome_options.add_experimental_option("prefs", prefs)
-    chrome_options.add_argument("--kiosk-printing")
-    chrome_options.add_argument("--enable-print-browser")
-    chrome_options.add_argument("user-data-dir=./browser_profile/")
+    chrome_options.add_argument("kiosk-printing")
+    chrome_options.add_argument("enable-print-browser")
     chrome_options.add_argument("window-size=1920,1080")
     if headless:
         chrome_options.add_argument("--headless")
 
-    DRIVER = webdriver.Chrome(chrome_options=chrome_options)
-    yield DRIVER
-    DRIVER.quit()
-    DRIVER = None
+    try:
+        DRIVER = webdriver.Chrome(chrome_options=chrome_options)
+        yield DRIVER
+        DRIVER.quit()
+    except WebDriverException as e:
+        if (
+            e.msg == "unknown error: failed to write prefs file"
+            or e.msg == "unknown error: cannot create default profile directory"
+            or "user-data-dir" in e.msg
+        ):
+            raise Exception(
+                "Could not write chromium profile. Make sure chromium can "
+                f"write to {CONFIG_DIR}. This may happen if you installed "
+                "chromium with snap without setting --devmode."
+            )
+        raise e
+    finally:
+        DRIVER = None
 
 
 def login():
     print("logging in")
-    with create_driver() as driver:
+    with create_driver(headless=False) as driver:
         driver.get("https://app.nytimes.com/")
         while True:
-            print("waiting for browser to close")
+            if is_logged_in(driver):
+                print("Sucessfully logged in")
+                return
             try:
                 _ = driver.window_handles
             except selenium.common.exceptions.WebDriverException:
                 break
             time.sleep(1)
+
+
+def is_logged_in(driver):
+    cookies = driver.get_cookies()
+    if not any(c["name"] == "NYT-S" for c in cookies):
+        return False
+    return True
 
 
 def driver_click(driver, element):
@@ -120,8 +155,7 @@ def driver_click(driver, element):
 def download_pages(article_dir):
     with create_driver(headless=True) as driver:
         driver.get("https://app.nytimes.com/")
-        cookies = driver.get_cookies()
-        if not any(c["name"] == "NYT-S" for c in cookies):
+        if not is_logged_in(driver):
             raise NotLoggedIn
         time.sleep(5)
         try:
@@ -148,16 +182,17 @@ def download_pages(article_dir):
             ).text
             headlines = section.find_elements(By.CLASS_NAME, "headline")
             for headline in headlines:
-                article_filename = (
-                    article_dir
-                    / f"{article_num:04d}_{section_title.replace('/', '_')}_{headline.text.replace('/', '_')}.pdf"
+                article_filename = article_dir / (
+                    f"{article_num:04d}_"
+                    f"{section_title.replace('/', '_')}_"
+                    f"{headline.text.replace('/', '_')}.pdf"
                 )
                 try:
                     headline.click()
                     print("Article Filename:", article_filename)
                 except (
-                    selenium.common.exceptions.ElementClickInterceptedException,
-                    selenium.common.exceptions.ElementNotInteractableException,
+                    ElementClickInterceptedException,
+                    ElementNotInteractableException,
                 ):
                     print("Skipping headline:", headline.text)
                     continue

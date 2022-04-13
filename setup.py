@@ -5,7 +5,7 @@ with open("README.md") as f:
 
 setup(
     name="nymarkable",
-    version="0.1",
+    version="0.2",
     author="Micha Gorelick",
     author_email="mynameisfiber@gmail.com",
     url="https://github.com/mynameisfiber/nymarkable/",
@@ -17,11 +17,11 @@ setup(
         "selenium==4.1.3",
         "pypdf2==1.26.0",
         "click==8.0.3",
+        "requests==2.26.0",
     ],
     entry_points={
         "console_scripts": [
             "nymarkable = nymarkable:cli",
         ],
-    }
+    },
 )
-
