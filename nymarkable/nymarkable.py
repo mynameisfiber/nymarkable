@@ -176,7 +176,7 @@ def download_pages(article_dir):
         article_pdfs = []
         for section in sections:
             section.click()
-            time.sleep(1)
+            time.sleep(3)
             section_title = section.find_element(
                 By.CLASS_NAME, "accordion-section-header-text"
             ).text
@@ -196,6 +196,7 @@ def download_pages(article_dir):
                 ):
                     print("Skipping headline:", headline.text)
                     continue
+                time.sleep(2)
                 print_pdf(driver, article_filename)
                 article_pdfs.append(
                     {"filename": article_filename, "headline": headline.text}

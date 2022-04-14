@@ -4,3 +4,4 @@ temp
 build
 venv
 *.egg-info/
+env

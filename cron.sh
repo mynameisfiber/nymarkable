@@ -1,6 +1,9 @@
 #!/bin/bash
 
 source ./venv/bin/activate
+if [ -e ./env ] ; then
+    source ./env
+fi
 
 rm ~/tmp/nytimes.pdf
 nymarkable create-edition ~/tmp/nytimes.pdf
