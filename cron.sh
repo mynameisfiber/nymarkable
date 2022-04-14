@@ -47,7 +47,7 @@ echo "Uploading"
 rmapi put "${cur_abspath}" /Reading/nytimes/
 
 echo "Clearing all but most recent 12 editions"
-list-files /Reading/nytimes/ "nytimes" | sort -n | head -n -10 | (
+list-files /Reading/nytimes/ "nytimes" | sort -rn | head -n -12 | (
     while read FNAME; do
         echo "Deleting old edition: ${FNAME}";
         rmapi rm "${FNAME}";

@@ -5,7 +5,7 @@ with open("README.md") as f:
 
 setup(
     name="nymarkable",
-    version="0.3.0",
+    version="0.3.1",
     author="Micha Gorelick",
     author_email="mynameisfiber@gmail.com",
     url="https://github.com/mynameisfiber/nymarkable/",
