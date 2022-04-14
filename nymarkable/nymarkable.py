@@ -3,6 +3,7 @@
 import json
 import time
 from contextlib import contextmanager
+from itertools import groupby
 import tempfile
 from pathlib import Path
 import base64
@@ -19,7 +20,7 @@ from selenium.common.exceptions import (
     ElementNotInteractableException,
 )
 from selenium import webdriver
-from PyPDF2 import PdfFileMerger
+from PyPDF2 import PdfFileMerger, PdfFileReader
 
 
 DRIVER = None
@@ -45,6 +46,7 @@ def login_cli():
 @click.argument("output-file", type=click.Path(dir_okay=False, writable=True))
 @click.option("--section", multiple=True, type=str, default=None)
 def create_edition_cli(output_file, section):
+    output_file = Path(output_file)
     with tempfile.TemporaryDirectory(dir=CONFIG_DIR) as tempdir:
         articles = login_and_download(Path(tempdir), allow_sections=section)
         merge_pdfs(articles, output_file)
@@ -210,7 +212,7 @@ def download_pages(article_dir, allow_sections=None):
                 )
                 try:
                     headline.click()
-                    print("Article Filename:", article_filename)
+                    print(f"Adding Article: {section_title}: {headline.text}")
                 except (
                     ElementClickInterceptedException,
                     ElementNotInteractableException,
@@ -220,7 +222,7 @@ def download_pages(article_dir, allow_sections=None):
                 time.sleep(1)
                 print_pdf(driver, article_filename)
                 article_pdfs.append(
-                    {"filename": article_filename, "headline": headline.text}
+                    {"filename": article_filename, "headline": headline.text, "section": section_title}
                 )
                 article_num += 1
     return article_pdfs
@@ -234,9 +236,18 @@ def print_pdf(driver, output):
 
 def merge_pdfs(articles, output):
     merger = PdfFileMerger()
-    for article in articles:
-        merger.append(str(article["filename"].resolve()), bookmark=article["headline"])
-    merger.write(str(output))
+    pages = 0
+    for section, section_articles in groupby(articles, lambda a: a['section']):
+        section_bookmark = merger.addBookmark(section, pages)
+        for article in section_articles:
+            print(f"Adding article: {article['section']}: {article['headline']}: {pages}")
+            with article["filename"].open('rb') as fd:
+                pdf = PdfFileReader(fd)
+                merger.append(pdf)
+                merger.addBookmark(article["headline"], pages, parent=section_bookmark)
+                pages += pdf.getNumPages()
+    with output.open('wb') as fd:
+        merger.write(fd)
     merger.close()
 
 

@@ -28,9 +28,9 @@ if list-files /Reading/nytimes/ "${cur_basename}"; then
     exit
 fi
 
-
 mkdir -p "${BUILD_DIR}" || true
-rm  "${BUILD_DIR}/*" || true
+find "${BUILD_DIR}" -type f -delete || true
+
 nymarkable \
     create-edition \
         --section "The Front Page" \
