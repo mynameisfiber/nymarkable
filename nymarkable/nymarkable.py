@@ -43,19 +43,21 @@ def login_cli():
 
 @cli.command("create-edition")
 @click.argument("output-file", type=click.Path(dir_okay=False, writable=True))
-def create_edition_cli(output_file):
+@click.option("--section", multiple=True, type=str, default=None)
+def create_edition_cli(output_file, section):
     with tempfile.TemporaryDirectory(dir=CONFIG_DIR) as tempdir:
-        articles = login_and_download(Path(tempdir))
+        articles = login_and_download(Path(tempdir), allow_sections=section)
         merge_pdfs(articles, output_file)
 
 
 @cli.command("update-device")
 @click.option("--device-ip", default="10.11.99.1", type=str)
 @click.option("--filename", default="nytimes.pdf")
-def update_device(device_ip, filename):
+@click.option("--section", multiple=True, type=str, default=None)
+def update_device(device_ip, filename, section):
     with tempfile.TemporaryDirectory(dir=CONFIG_DIR) as tempdir:
         tempdir = Path(tempdir)
-        articles = login_and_download(tempdir)
+        articles = login_and_download(tempdir, allow_sections=section)
         merge_pdfs(articles, tempdir / "output.pdf")
         headers = {
             "Origin": f"http://{device_ip}",
@@ -70,6 +72,17 @@ def update_device(device_ip, filename):
             ),
         }
         requests.post(f"http://{device_ip}/upload", headers=headers, files=files)
+
+
+@cli.command("sections")
+def list_sections_cli():
+    with create_driver(headless=True) as driver:
+        sections = load_edition_list_sections(driver)
+        for section in sections:
+            section_title = section.find_element(
+                By.CLASS_NAME, "accordion-section-header-text"
+            ).text
+            click.echo(section_title)
 
 
 @contextmanager
@@ -152,34 +165,42 @@ def driver_click(driver, element):
     driver.execute_script("arguments[0].click();", element)
 
 
-def download_pages(article_dir):
-    with create_driver(headless=True) as driver:
-        driver.get("https://app.nytimes.com/")
-        if not is_logged_in(driver):
-            raise NotLoggedIn
-        time.sleep(5)
-        try:
-            download = driver.find_element(
-                By.XPATH, '//div[@class = "overlay"]/h2[text() = "Click to Read"]'
-            )
-            print("Downoading edition")
-            download.click()
-            time.sleep(5)
-        except selenium.common.exceptions.NoSuchElementException:
-            pass
-
-        sections = driver.find_elements(
-            By.CLASS_NAME,
-            "accordion-section",
+def load_edition_list_sections(driver):
+    driver.get("https://app.nytimes.com/")
+    if not is_logged_in(driver):
+        raise NotLoggedIn
+    time.sleep(5)
+    try:
+        download = driver.find_element(
+            By.XPATH, '//div[@class = "overlay"]/h2[text() = "Click to Read"]'
         )
+        print("Downoading edition")
+        download.click()
+        time.sleep(3)
+    except selenium.common.exceptions.NoSuchElementException:
+        pass
+    
+    sections = driver.find_elements(
+        By.CLASS_NAME,
+        "accordion-section",
+    )
+    return sections
+
+
+def download_pages(article_dir, allow_sections=None):
+    with create_driver(headless=True) as driver:
+        sections = load_edition_list_sections(driver)
         article_num = 0
         article_pdfs = []
         for section in sections:
-            section.click()
-            time.sleep(3)
             section_title = section.find_element(
                 By.CLASS_NAME, "accordion-section-header-text"
             ).text
+            if allow_sections and section_title not in allow_sections:
+                print("Skipping section:", section_title)
+                continue
+            section.click()
+            time.sleep(2)
             headlines = section.find_elements(By.CLASS_NAME, "headline")
             for headline in headlines:
                 article_filename = article_dir / (
@@ -196,7 +217,7 @@ def download_pages(article_dir):
                 ):
                     print("Skipping headline:", headline.text)
                     continue
-                time.sleep(2)
+                time.sleep(1)
                 print_pdf(driver, article_filename)
                 article_pdfs.append(
                     {"filename": article_filename, "headline": headline.text}
@@ -219,11 +240,11 @@ def merge_pdfs(articles, output):
     merger.close()
 
 
-def login_and_download(article_dir):
+def login_and_download(article_dir, allow_sections=None):
     while True:
         print("Attempting")
         try:
-            return download_pages(article_dir)
+            return download_pages(article_dir, allow_sections=allow_sections)
             break
         except NotLoggedIn:
             login()
