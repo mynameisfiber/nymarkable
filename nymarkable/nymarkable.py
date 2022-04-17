@@ -1,27 +1,24 @@
 #!/bin/env python3
 
+import base64
 import json
+import tempfile
 import time
 from contextlib import contextmanager
 from itertools import groupby
-import tempfile
 from pathlib import Path
-import base64
-
 
 import click
 import requests
-
 import selenium
-from selenium.webdriver.common.by import By
+from PyPDF2 import PdfFileMerger, PdfFileReader
+from selenium import webdriver
 from selenium.common.exceptions import (
-    WebDriverException,
     ElementClickInterceptedException,
     ElementNotInteractableException,
+    WebDriverException,
 )
-from selenium import webdriver
-from PyPDF2 import PdfFileMerger, PdfFileReader
-
+from selenium.webdriver.common.by import By
 
 DRIVER = None
 CONFIG_DIR = Path("~/.nymarkable").expanduser()
@@ -49,6 +46,9 @@ def create_edition_cli(output_file, section):
     output_file = Path(output_file)
     with tempfile.TemporaryDirectory(dir=CONFIG_DIR) as tempdir:
         articles = login_and_download(Path(tempdir), allow_sections=section)
+        if not articles:
+            click.echo("No articles found")
+            return
         merge_pdfs(articles, output_file)
 
 
@@ -60,6 +60,9 @@ def update_device(device_ip, filename, section):
     with tempfile.TemporaryDirectory(dir=CONFIG_DIR) as tempdir:
         tempdir = Path(tempdir)
         articles = login_and_download(tempdir, allow_sections=section)
+        if not articles:
+            click.echo("No articles found")
+            return
         merge_pdfs(articles, tempdir / "output.pdf")
         headers = {
             "Origin": f"http://{device_ip}",
@@ -163,6 +166,55 @@ def is_logged_in(driver):
     return True
 
 
+def inject_css(driver, css):
+    if not getattr(driver, "_inject_css", False):
+        # Javascript from https://stackoverflow.com/a/15506705
+        driver.execute_script(
+            """
+            window.addStyle = function(styleString) {
+                const style = document.createElement('style');
+                style.textContent = styleString;
+                document.head.append(style);
+            }
+        """
+        )
+        driver._inject_css = True
+    if "`" in css:
+        raise ValueError("Injected CSS cannot contain backtick (`) character")
+    driver.execute_script(f"window.addStyle(`{css}`);")
+
+
+def fix_print_images(driver):
+    css = """
+        @media print{
+            .main-asset,
+            .asset,
+            .thumbnails {
+                display: block !important;
+            } 
+        }
+    """
+    inject_css(driver, css)
+
+
+def fix_section_images_load(driver):
+    scroll_pause_time = 0.1
+    last_height = driver.execute_script("return window.scrollY")
+    print("Scrolling: ", end="", flush=True)
+    while True:
+        print(".", end="", flush=True)
+        driver.execute_script(
+            "window.scrollTo(0, window.scrollY + window.innerHeight);"
+        )
+        time.sleep(scroll_pause_time)
+        new_height = driver.execute_script("return window.scrollY")
+        if new_height == last_height:
+            break
+        last_height = new_height
+    print()
+    return last_height
+
+
 def driver_click(driver, element):
     driver.execute_script("arguments[0].click();", element)
 
@@ -181,7 +233,7 @@ def load_edition_list_sections(driver):
         time.sleep(3)
     except selenium.common.exceptions.NoSuchElementException:
         pass
-    
+
     sections = driver.find_elements(
         By.CLASS_NAME,
         "accordion-section",
@@ -192,6 +244,7 @@ def load_edition_list_sections(driver):
 def download_pages(article_dir, allow_sections=None):
     with create_driver(headless=True) as driver:
         sections = load_edition_list_sections(driver)
+        fix_print_images(driver)
         article_num = 0
         article_pdfs = []
         for section in sections:
@@ -203,6 +256,8 @@ def download_pages(article_dir, allow_sections=None):
                 continue
             section.click()
             time.sleep(2)
+            fix_section_images_load(driver)
+
             headlines = section.find_elements(By.CLASS_NAME, "headline")
             for headline in headlines:
                 article_filename = article_dir / (
@@ -222,7 +277,12 @@ def download_pages(article_dir, allow_sections=None):
                 time.sleep(1)
                 print_pdf(driver, article_filename)
                 article_pdfs.append(
-                    {"filename": article_filename, "headline": headline.text, "section": section_title}
+                    {
+                        "filename": article_filename,
+                        "headline": headline.text,
+                        "section": section_title,
+                        "order": article_num,
+                    }
                 )
                 article_num += 1
     return article_pdfs
@@ -237,16 +297,19 @@ def print_pdf(driver, output):
 def merge_pdfs(articles, output):
     merger = PdfFileMerger()
     pages = 0
-    for section, section_articles in groupby(articles, lambda a: a['section']):
+    articles.sort(key=lambda a: a["order"])
+    for section, section_articles in groupby(articles, lambda a: a["section"]):
         section_bookmark = merger.addBookmark(section, pages)
         for article in section_articles:
-            print(f"Adding article: {article['section']}: {article['headline']}: {pages}")
-            with article["filename"].open('rb') as fd:
+            print(
+                f"Adding article: {article['section']}: {article['headline']}: {pages}"
+            )
+            with article["filename"].open("rb") as fd:
                 pdf = PdfFileReader(fd)
                 merger.append(pdf)
                 merger.addBookmark(article["headline"], pages, parent=section_bookmark)
                 pages += pdf.getNumPages()
-    with output.open('wb') as fd:
+    with output.open("wb") as fd:
         merger.write(fd)
     merger.close()
 
